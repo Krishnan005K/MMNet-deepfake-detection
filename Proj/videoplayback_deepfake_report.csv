@@ -1,0 +1,2 @@
+video,model,audio_fake_p,lip_sync_fake_p,video_artifact_fake_p,final_fake_p,authenticity
+videoplayback.mp4,fake_audio_detector.pth,0.060951,0.514574,0.888728,0.279816,0.720184

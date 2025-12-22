@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Deepfake Detector</title>
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<div class="container">
+<h2>Deepfake Detector</h2>
+
+<form id="uploadForm">
+  <label>Select Video:</label>
+  <input type="file" id="video" accept="video/*" required><br>
+
+  <button type="submit">Analyze</button>
+</form>
+</div>
+
+<div id="result-box">Waiting for file...</div>
+
+<script>
+document.getElementById("uploadForm").onsubmit = async (e) => {
+    e.preventDefault();
+
+    const form = new FormData();
+    form.append("video", document.getElementById("video").files[0]);
+
+    document.getElementById("result-box").innerHTML = "<b>Processing...</b> ⏳";
+
+    const res = await fetch("http://127.0.0.1:8000/analyze", {
+        method: "POST",
+        body: form
+    });
+
+    const data = await res.json();
+    const raw = data.raw_report;
+
+    let formatted = raw
+        .replace(/=====.*=====/, "<h3 class='title'>Deepfake Report</h3>")
+        .replace(/VERDICT\s*:\s*(.*)/, "<b>VERDICT:</b> <span class='verdict'>$1</span>")
+        .replace(/\n/g, "<br>");
+
+    document.getElementById("result-box").innerHTML = formatted;
+};
+</script>
+
+</body>
+</html>
