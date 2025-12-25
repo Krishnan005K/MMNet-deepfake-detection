@@ -22,6 +22,9 @@ import torch.nn as nn
 import librosa
 
 import cv2
+FRAME_DIR = "frames"
+os.makedirs(FRAME_DIR, exist_ok=True)
+
 # from moviepy.editor import VideoFileClip
 
 # Try optional imports
@@ -291,6 +294,61 @@ def video_artifact_heuristic(video_path):
     return combined
 
 # -------------------------
+# Frame-by-frame deepfake analysis (Explainable)
+# -------------------------
+def frame_level_analysis(video_path, threshold=0.7, sample_rate=5):
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+
+    eye_cascade = cv2.CascadeClassifier(
+        cv2.data.haarcascades + "haarcascade_eye.xml"
+    )
+
+    frame_id = 0
+    suspicious = []
+
+    video_name = os.path.splitext(os.path.basename(video_path))[0]
+    out_dir = os.path.join(FRAME_DIR, video_name)
+    os.makedirs(out_dir, exist_ok=True)
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        frame_id += 1
+        if frame_id % sample_rate != 0:
+            continue
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        blur = cv2.Laplacian(gray, cv2.CV_64F).var()
+        blur_score = 1.0 - np.clip((blur - 50) / 1950, 0, 1)
+
+        eyes = eye_cascade.detectMultiScale(gray, 1.1, 6)
+        eye_missing = 1.0 if len(eyes) == 0 else 0.0
+
+        fake_score = 0.6 * blur_score + 0.4 * eye_missing
+
+        if fake_score >= threshold:
+            time_sec = round(frame_id / fps, 2)
+
+            frame_name = f"frame_{frame_id}_{time_sec}s.jpg"
+            frame_path = os.path.join(out_dir, frame_name)
+
+            cv2.imwrite(frame_path, frame)
+
+            suspicious.append({
+                "frame": frame_id,
+                "time_sec": time_sec,
+                "score": round(fake_score, 3),
+                "image_path": frame_path
+            })
+
+    cap.release()
+    return suspicious
+
+# -------------------------
 # 5) Overall pipeline
 # -------------------------
 def run_pipeline(video_path, model_path, out_audio="extracted_audio.wav", device_str=None, debug=False):
@@ -316,10 +374,16 @@ def run_pipeline(video_path, model_path, out_audio="extracted_audio.wav", device
     print("[+] Calculating lip-sync score (may take time)...")
     sync_score = compute_lip_sync_score(video_path, out_audio)   # 0..1 (1 = good sync)
     lip_fake_prob = 1.0 - sync_score
+    
 
     # 5. video artifact
     print("[+] Computing video artifact heuristic...")
     video_fake = video_artifact_heuristic(video_path)
+    # Frame-level explainable analysis
+    print("[+] Running frame-level explainable analysis...")
+    frame_points = frame_level_analysis(video_path)
+   
+
 
     # 6. combine scores
     # weights: audio 0.6, sync 0.3, video_artifact 0.1
@@ -330,6 +394,7 @@ def run_pipeline(video_path, model_path, out_audio="extracted_audio.wav", device
     # 7. print & save CSV
     base = os.path.splitext(os.path.basename(video_path))[0]
     csv_path = base + "_deepfake_report.csv"
+
     print("\n===== Deepfake Report =====")
     print(f"Video        : {video_path}")
     print(f"Model        : {model_path}")
@@ -339,27 +404,80 @@ def run_pipeline(video_path, model_path, out_audio="extracted_audio.wav", device
     print(f"Video art p  : {video_fake:.4f} (MMNET)")
     print(f"FINAL fake p : {final_fake_score:.4f}  (1 = very likely fake)")
     print(f"Authenticity : {authenticity:.4f}  (1 = likely real)")
+
     verdict = "FAKE" if final_fake_score >= 0.5 else "REAL/likely"
     print(f"VERDICT      : {verdict}")
 
+    # -------- Frame-level explainable output --------
+  
+    print("\n--- Frame-Level Analysis ---")
+    print(f"Suspicious Frames Count : {len(frame_points)}")
+    print(f"Suspicious Frames : {len(frame_points)}")
+
+    for p in frame_points[:5]:
+        print(f" • Time {p['time_sec']}s | Frame {p['frame']} | Score {p['score']}")
+
+
+    if len(frame_points) == 0:
+        print("No significant frame-level manipulation detected.")
+    else:
+        print("Potential deepfake detected at:")
+        for p in frame_points[:10]:  # limit console output
+            print(f"  • Time {p['time_sec']}s | Frame {p['frame']} | Score {p['score']}")
+
+        if len(frame_points) > 10:
+            print(f"  ...and {len(frame_points) - 10} more suspicious frames")
+
+    print("--------------------------------------")
+
+    # -------- Save CSV --------
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["video","model","audio_fake_p","lip_sync_fake_p","video_artifact_fake_p","final_fake_p","authenticity"])
-        writer.writerow([video_path, model_path, f"{fake_p:.6f}", f"{lip_fake_prob:.6f}", f"{video_fake:.6f}", f"{final_fake_score:.6f}", f"{authenticity:.6f}"])
+
+        writer.writerow([
+            "video",
+            "model",
+            "audio_fake_p",
+            "lip_sync_fake_p",
+            "video_artifact_fake_p",
+            "final_fake_p",
+            "authenticity",
+            "verdict",
+            "num_suspicious_frames",
+            "suspicious_timestamps_sec",
+            "suspicious_frame_numbers"
+        ])
+
+        writer.writerow([
+            video_path,
+            model_path,
+            f"{fake_p:.6f}",
+            f"{lip_fake_prob:.6f}",
+            f"{video_fake:.6f}",
+            f"{final_fake_score:.6f}",
+            f"{authenticity:.6f}",
+            verdict,
+            len(frame_points),
+            [p["time_sec"] for p in frame_points],
+            [p["frame"] for p in frame_points]
+        ])
+
     print(f"[+] CSV saved: {csv_path}")
 
     # cleanup audio if temporary
     # os.remove(out_audio)  # keep for debugging
     return {
-        "video": video_path,
-        "model": model_path,
-        "audio_fake_p": fake_p,
-        "lip_sync_fake_p": lip_fake_prob,
-        "video_artifact_fake_p": video_fake,
-        "final_fake_p": final_fake_score,
-        "authenticity": authenticity,
-        "verdict": verdict
-    }
+    "video": video_path,
+    "model": model_path,
+    "audio_fake_p": fake_p,
+    "lip_sync_fake_p": lip_fake_prob,
+    "video_artifact_fake_p": video_fake,
+    "final_fake_p": final_fake_score,
+    "authenticity": authenticity,
+    "verdict": verdict,
+    "frame_level_points": frame_points,   # 👈 EXPLAINABLE OUTPUT
+    "num_suspicious_frames": len(frame_points)
+}
 
 
 def detect(video_path, audio_path, model_path="../fake_audio_detector.pth"):
