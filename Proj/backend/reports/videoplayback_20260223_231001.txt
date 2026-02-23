@@ -1,0 +1,26 @@
+[+] Device: cpu
+[+] Loading audio model...
+[+] Predicting audio deepfake probability...
+[+] Calculating lip-sync score (may take time)...
+[+] Computing video artifact heuristic...
+[+] Running frame-level explainable analysis...
+
+===== Deepfake Report =====
+Video        : D:\Projects\Final Yr Proj\phase 1 project\MMNet-deepfake-detection\Proj\backend\uploads\videoplayback.mp4
+Model        : ../fake_audio_detector.pth
+Audio Fake Model : 0.0610   (audio model)
+Video Fake Model : MMNET model  (video model)
+Lip-sync p   : 0.5146 (1 - sync_score; 0=good sync)
+Video art p  : 0.8887 (MMNET)
+FINAL fake p : 0.2798  (1 = very likely fake)
+Authenticity : 0.7202  (1 = likely real)
+VERDICT      : REAL/likely
+
+--- Frame-Level Analysis ---
+Suspicious Frames Count : 1
+Suspicious Frames : 1
+ • Time 28.6s | Frame 715 | Score 1.0
+Potential deepfake detected at:
+  • Time 28.6s | Frame 715 | Score 1.0
+--------------------------------------
+[+] CSV saved: videoplayback_deepfake_report.csv

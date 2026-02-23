@@ -1,50 +1,78 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Deepfake Detector</title>
-<link rel="stylesheet" href="style.css">
+    <title>Deepfake Detector</title>
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Google Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+
+    <!-- FontAwesome -->
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 
 <body>
 
-<div class="container">
-<h2>Deepfake Detector</h2>
+<header>
+    🎭 Deepfake Detection System
+</header>
 
-<form id="uploadForm">
-  <label>Select Video:</label>
-  <input type="file" id="video" accept="video/*" required><br>
+<div class="layout">
 
-  <button type="submit">Analyze</button>
-</form>
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+        <h2>🕘 Processing History</h2>
+        <div id="history-list">
+            <p class="no-history">No processing history yet</p>
+        </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+
+        <div class="upload-section">
+
+            <div class="drop-zone" id="dropZone">
+                <p>Drag & Drop Video Here</p>
+                <span>or click to browse</span>
+                <input type="file" id="video" accept="video/*" hidden>
+            </div>
+
+            <button id="analyzeBtn">Analyze ➜</button>
+
+        </div>
+
+        <div id="result-box">
+            Waiting for upload...
+        </div>
+
+    </main>
+
 </div>
 
-<div id="result-box">Waiting for file...</div>
+<!-- REPORT POPUP MODAL -->
+<div id="reportModal" class="modal">
+    <div class="modal-content">
 
-<script>
-document.getElementById("uploadForm").onsubmit = async (e) => {
-    e.preventDefault();
+        <div class="modal-header">
+            <h3 id="modalTitle">Report</h3>
+            <i class="fa-solid fa-xmark close-btn" id="closeModal"></i>
+        </div>
 
-    const form = new FormData();
-    form.append("video", document.getElementById("video").files[0]);
+        <div class="modal-body">
+            <pre id="modalReportContent"></pre>
+        </div>
 
-    document.getElementById("result-box").innerHTML = "<b>Processing...</b> ⏳";
+        <div class="modal-footer">
+            <button id="downloadBtn">
+                <i class="fa-solid fa-download"></i> Download Report
+            </button>
+        </div>
 
-    const res = await fetch("http://127.0.0.1:8000/analyze", {
-        method: "POST",
-        body: form
-    });
+    </div>
+</div>
 
-    const data = await res.json();
-    const raw = data.raw_report;
-
-    let formatted = raw
-        .replace(/=====.*=====/, "<h3 class='title'>Deepfake Report</h3>")
-        .replace(/VERDICT\s*:\s*(.*)/, "<b>VERDICT:</b> <span class='verdict'>$1</span>")
-        .replace(/\n/g, "<br>");
-
-    document.getElementById("result-box").innerHTML = formatted;
-};
-</script>
-
+<script src="script.js"></script>
 </body>
 </html>

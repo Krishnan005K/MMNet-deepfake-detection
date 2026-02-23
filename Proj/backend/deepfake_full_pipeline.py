@@ -480,7 +480,17 @@ def run_pipeline(video_path, model_path, out_audio="extracted_audio.wav", device
 }
 
 
-def detect(video_path, audio_path, model_path="../fake_audio_detector.pth"):
+def detect(video_path, model_path="../fake_audio_detector.pth"):
+
+    base_name = os.path.splitext(video_path)[0]
+    audio_path = base_name + ".wav"
+
+    # Extract audio using moviepy (NO system ffmpeg dependency)
+    from moviepy.editor import VideoFileClip
+
+    video = VideoFileClip(video_path)
+    video.audio.write_audiofile(audio_path)
+
     return run_pipeline(video_path, model_path, out_audio=audio_path)
 
 # -------------------------

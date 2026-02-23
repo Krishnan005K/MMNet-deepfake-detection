@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 from io import StringIO
+from datetime import datetime
 
 from deepfake_full_pipeline import detect
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,67 +25,82 @@ app.add_middleware(
 # -----------------------------
 # Directories
 # -----------------------------
-UPLOAD_DIR = "uploads"
-FRAME_DIR = "frames"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+FRAME_DIR = os.path.join(BASE_DIR, "frames")
+REPORT_DIR = os.path.join(BASE_DIR, "reports")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(FRAME_DIR, exist_ok=True)
+os.makedirs(REPORT_DIR, exist_ok=True)
 
 # -----------------------------
-# Expose frame images to frontend
+# Static
 # -----------------------------
-app.mount("/frames", StaticFiles(directory="frames"), name="frames")
-
+app.mount("/frames", StaticFiles(directory=FRAME_DIR), name="frames")
+app.mount("/reports", StaticFiles(directory=REPORT_DIR), name="reports")
 # -----------------------------
-# Root (optional, avoids 404)
+# Root
 # -----------------------------
 @app.get("/")
 def root():
     return {"message": "Deepfake Detection API running"}
 
 # -----------------------------
-# Analyze endpoint
+# Analyze
 # -----------------------------
 @app.post("/analyze")
 async def analyze(video: UploadFile = File(...)):
-    # Save uploaded video
-    video_path = os.path.join(UPLOAD_DIR, video.filename)
+
+    video_filename = video.filename
+    base_name = os.path.splitext(video_filename)[0]
+
+    video_path = os.path.join(UPLOAD_DIR, video_filename)
+
     with open(video_path, "wb") as f:
         shutil.copyfileobj(video.file, f)
 
-    # Extract audio
-    audio_path = video_path.rsplit(".", 1)[0] + ".wav"
-    subprocess.call(
-        f'ffmpeg -y -i "{video_path}" -vn -acodec pcm_s16le -ar 22050 -ac 1 "{audio_path}"',
-        shell=True
-    )
-
-    # Capture printed output from pipeline
+    # Capture output
     old_stdout = sys.stdout
     sys.stdout = mystdout = StringIO()
 
-    # Run deepfake pipeline
-    results = detect(video_path, audio_path)
+    results = detect(video_path)
 
     sys.stdout = old_stdout
     terminal_output = mystdout.getvalue()
 
-    # -----------------------------
-    # Extract frame image URLs
-    # -----------------------------
-    frames = []
-    for p in results.get("frame_level_points", []):
-        frames.append({
-            "frame": p["frame"],
-            "time_sec": p["time_sec"],
-            "score": p["score"],
-            # convert local path -> public URL
-            "image_url": f"/{p['image_path'].replace(os.sep, '/')}"
-        })
+    # Save report
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_filename = f"{base_name}_{timestamp}.txt"
+    report_path = os.path.join(REPORT_DIR, report_filename)
+
+    with open(report_path, "w", encoding="utf-8") as f:
+        f.write(terminal_output)
 
     return {
-        "video": video.filename,
-        "audio_used": os.path.basename(audio_path),
-        "raw_report": terminal_output,   # keeps your existing UI working
-        "frames": frames                # NEW: frame images + timestamps
+        "video": video_filename,
+        "report_file": report_filename,
+        "raw_report": terminal_output,
+        "frames": results.get("frame_level_points", [])
     }
+# -----------------------------
+# Reports History
+# -----------------------------
+@app.get("/reports")
+def get_reports():
+
+    files = sorted(
+        os.listdir(REPORT_DIR),
+        reverse=True  # latest first
+    )
+
+    reports = []
+
+    for file in files:
+        if file.endswith(".txt"):
+            reports.append({
+                "filename": file
+            })
+
+    return {"reports": reports}
