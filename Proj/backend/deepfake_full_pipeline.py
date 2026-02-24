@@ -15,7 +15,9 @@ import argparse
 import csv
 import math
 from tqdm import tqdm
-
+import matplotlib.pyplot as plt
+from fpdf import FPDF
+import pandas as pd
 import numpy as np
 import torch
 import torch.nn as nn
@@ -54,6 +56,125 @@ class FakeAudioDetector(nn.Module):
         x = self.net(x)
         x = x.view(x.size(0), -1)
         return self.fc(x)
+
+
+
+
+
+
+def generate_pdf_report(video_name, csv_path, frames_dir, report_dir):
+    """
+    video_name: original video filename
+    csv_path: path to CSV report
+    frames_dir: path to video frames folder
+    report_dir: where PDF should be saved
+    """
+
+    # ------------------------
+    # Load CSV
+    # ------------------------
+    df = pd.read_csv(csv_path)
+    
+    total_frames = len(df)
+    fake_frames = df[df['final_fake_p'] > 0.5]  # threshold for fake
+    fake_count = len(fake_frames)
+    fake_percentage = (fake_count / total_frames) * 100 if total_frames > 0 else 0
+    verdict = df['verdict'][0] if 'verdict' in df.columns else "UNKNOWN"
+    
+    # ------------------------
+    # PDF Setup
+    # ------------------------
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_name = os.path.splitext(video_name)[0]
+    pdf_filename = f"{base_name}_{timestamp}_report.pdf"
+    pdf_path = os.path.join(report_dir, pdf_filename)
+    
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    
+    # ------------------------
+    # Cover Page
+    # ------------------------
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, "🎭 Deepfake Detection Report", ln=True, align='C')
+    pdf.ln(5)
+    
+    pdf.set_font("Arial", '', 12)
+    pdf.cell(0, 10, f"Video: {video_name}", ln=True)
+    pdf.cell(0, 10, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True)
+    pdf.cell(0, 10, f"Verdict: {verdict}", ln=True)
+    pdf.cell(0, 10, f"Total Frames: {total_frames}", ln=True)
+    pdf.cell(0, 10, f"Fake Frames Detected: {fake_count} ({fake_percentage:.2f}%)", ln=True)
+    pdf.ln(5)
+    
+    # ------------------------
+    # Plot Fake Probability Graph
+    # ------------------------
+    plt.figure(figsize=(10,4))
+    plt.plot(df.index, df['final_fake_p'], label='Fake Probability')
+    plt.xlabel("Frame Number")
+    plt.ylabel("Final Fake Probability")
+    plt.title("Fake Probability Over Frames")
+    plt.grid(True)
+    plt.tight_layout()
+    
+    plot_path = os.path.join(report_dir, f"{base_name}_fake_plot.png")
+    plt.savefig(plot_path)
+    plt.close()
+    
+    pdf.image(plot_path, w=180)
+    pdf.ln(5)
+    
+    # ------------------------
+    # Add Sample Fake Frames
+    # ------------------------
+    pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 10, "Sample Manipulated Frames:", ln=True)
+    
+    sample_frames = fake_frames.head(10)  # take first 10 fake frames
+    for _, row in sample_frames.iterrows():
+        # Frame filename is like: frame_{frameNumber}_{frameSeconds}.jpg
+        frame_number = int(row['suspicious_frame_numbers'].strip("[]").split(",")[0])
+        frame_sec = float(row['suspicious_timestamps_sec'].strip("[]").split(",")[0])
+        frame_file = os.path.join(frames_dir, base_name, f"frame_{frame_number}_{frame_sec:.2f}.jpg")
+        if os.path.exists(frame_file):
+            pdf.image(frame_file, w=90)
+            pdf.ln(5)
+    
+    # ------------------------
+    # XAI-style textual summary
+    # ------------------------
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 10, "Manipulation Analysis (XAI-style):", ln=True)
+    pdf.ln(3)
+    pdf.set_font("Arial", '', 12)
+    
+    summary_text = f"""
+    The video contains {fake_count} frames with potential manipulations.
+    The highest probability of fake frame: {df['final_fake_p'].max():.2f}.
+    The lowest probability of fake frame: {df['final_fake_p'].min():.2f}.
+    
+    Key observations:
+    - Lip Sync anomalies: average {df['lip_sync_fake_p'].mean():.2f}
+    - Audio manipulation probability: average {df['audio_fake_p'].mean():.2f}
+    - Video artifacts detected: average {df['video_artifact_fake_p'].mean():.2f}
+    
+    Frames with highest manipulation probability have been highlighted above.
+    """
+    pdf.multi_cell(0, 6, summary_text)
+    
+    # ------------------------
+    # Save PDF
+    # ------------------------
+    pdf.output(pdf_path)
+    
+    # Clean up plot image
+    if os.path.exists(plot_path):
+        os.remove(plot_path)
+    
+    return pdf_path
 
 def load_audio_model(model_path, device):
     model = FakeAudioDetector().to(device)

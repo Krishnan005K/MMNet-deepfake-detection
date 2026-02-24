@@ -1,3 +1,6 @@
+// ==========================================
+// ELEMENTS
+// ==========================================
 const dropZone = document.getElementById("dropZone");
 const fileInput = document.getElementById("video");
 const analyzeBtn = document.getElementById("analyzeBtn");
@@ -7,24 +10,26 @@ const historyDiv = document.getElementById("history-list");
 let selectedFile = null;
 let timerInterval;
 let startTime;
-// ---------------------------
-// CLICK TO SELECT
-// ---------------------------
-dropZone.onclick = () => fileInput.click();
 
-// ---------------------------
-// FILE SELECTED
-// ---------------------------
-fileInput.addEventListener("change", () => {
-    if (fileInput.files.length > 0) {
-        selectedFile = fileInput.files[0];
+
+// ==========================================
+// FILE SELECTION (CLICK)
+// ==========================================
+dropZone.addEventListener("click", () => {
+    fileInput.click();
+});
+
+fileInput.addEventListener("change", (e) => {
+    if (e.target.files.length > 0) {
+        selectedFile = e.target.files[0];
         updateDropZoneUI(selectedFile.name);
     }
 });
 
-// ---------------------------
-// DRAG EVENTS
-// ---------------------------
+
+// ==========================================
+// DRAG & DROP
+// ==========================================
 dropZone.addEventListener("dragover", (e) => {
     e.preventDefault();
     dropZone.classList.add("dragover");
@@ -38,48 +43,51 @@ dropZone.addEventListener("drop", (e) => {
     e.preventDefault();
     dropZone.classList.remove("dragover");
 
-    selectedFile = e.dataTransfer.files[0];
-    fileInput.files = e.dataTransfer.files;
-
-    updateDropZoneUI(selectedFile.name);
+    if (e.dataTransfer.files.length > 0) {
+        selectedFile = e.dataTransfer.files[0];
+        fileInput.files = e.dataTransfer.files;
+        updateDropZoneUI(selectedFile.name);
+    }
 });
 
-// ---------------------------
-// UPDATE DROP ZONE AFTER FILE ADDED
-// ---------------------------
+
+// ==========================================
+// UPDATE DROPZONE UI
+// ==========================================
 function updateDropZoneUI(fileName) {
     dropZone.innerHTML = `
-        <p style="font-size:16px;">✅ File Ready for Analysis</p>
+        <p style="font-size:16px;">✅ File Ready</p>
         <span style="color:#22c55e;">${fileName}</span>
         <p style="font-size:12px; margin-top:8px; color:#94a3b8;">
-            Click again to change file
+            Click to change file
         </p>
         <input type="file" id="video" accept="video/*" hidden>
     `;
 
     dropZone.style.borderColor = "#22c55e";
 
-    // Reattach file input
     const newInput = dropZone.querySelector("input");
     newInput.addEventListener("change", (e) => {
         selectedFile = e.target.files[0];
         updateDropZoneUI(selectedFile.name);
     });
 
-    dropZone.onclick = () => newInput.click();
+    dropZone.addEventListener("click", () => newInput.click());
 }
-// ---------------------------
-// TIMER (OPTIONAL)
-// ---------------------------
+
+
+// ==========================================
+// TIMER
+// ==========================================
 function startTimer() {
     startTime = Date.now();
 
     timerInterval = setInterval(() => {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         resultBox.innerHTML = `
-            Processing...  Time Elapsed:
-            <span style="font-size:14px; color:#94a3b8;">
-                 ${elapsed}s
+            Processing... ⏳ 
+            <span style="color:#94a3b8; font-size:14px;">
+                ${elapsed}s
             </span>
         `;
     }, 100);
@@ -88,46 +96,48 @@ function startTimer() {
 function stopTimer() {
     clearInterval(timerInterval);
 }
-// ---------------------------
+
+
+// ==========================================
 // ANALYZE BUTTON
-// ---------------------------
-analyzeBtn.onclick = async () => {
+// ==========================================
+analyzeBtn.addEventListener("click", async () => {
 
     if (!selectedFile) {
         alert("Please select a video first");
         return;
     }
 
-    const form = new FormData();
-    form.append("video", selectedFile);
+    const formData = new FormData();
+    formData.append("video", selectedFile);
 
-   //resultBox.innerHTML = "Processing... ⏳ Please wait";
     startTimer();
 
     try {
-        const res = await fetch("http://127.0.0.1:8000/analyze", {
+        const response = await fetch("http://127.0.0.1:8000/analyze", {
             method: "POST",
-            body: form
+            body: formData
         });
 
-        const data = await res.json();
+        const data = await response.json();
 
-       //resultBox.innerText = data.raw_report;
-        
         stopTimer();
-      resultBox.innerText = data.raw_report;
-        // Refresh history after success
+
+        resultBox.innerText = data.raw_report;
+
         loadHistory();
 
-    } catch (err) {
+    } catch (error) {
         stopTimer();
         resultBox.innerHTML = "❌ Error processing video";
+        console.error(error);
     }
-};
+});
 
-// ---------------------------
-// LOAD HISTORY
-// ---------------------------
+
+// ==========================================
+// LOAD REPORT HISTORY
+// ==========================================
 async function loadHistory() {
     try {
         const res = await fetch("http://127.0.0.1:8000/reports");
@@ -135,75 +145,66 @@ async function loadHistory() {
 
         historyDiv.innerHTML = "";
 
-        if (data.reports.length === 0) {
-            historyDiv.innerHTML = "<p class='no-history'>No processing history yet</p>";
+        if (!data.reports || data.reports.length === 0) {
+            historyDiv.innerHTML =
+                "<p class='no-history'>No processing history yet</p>";
             return;
         }
 
+        // Group reports by folder
+        const grouped = {};
+
         data.reports.forEach(report => {
-            const div = document.createElement("div");
-            div.className = "history-item";
-            div.innerText = report.filename;
-
-            div.onclick = async () => {
-                loadReport(report.filename);
-            };
-
-            historyDiv.appendChild(div);
+            if (!grouped[report.folder]) {
+                grouped[report.folder] = [];
+            }
+            grouped[report.folder].push(report.filename);
         });
 
-    } catch (err) {
-        historyDiv.innerHTML = "<p class='no-history'>Error loading history</p>";
+        // Render folders
+        Object.keys(grouped).forEach(folder => {
+
+            const folderDiv = document.createElement("div");
+            folderDiv.className = "history-folder";
+
+            const folderTitle = document.createElement("h4");
+            folderTitle.innerText = `📁 ${folder}`;
+            folderDiv.appendChild(folderTitle);
+
+            grouped[folder].forEach(file => {
+
+                const fileDiv = document.createElement("div");
+                fileDiv.className = "history-item";
+
+                let icon = "📄";
+                if (file.endsWith(".pdf")) icon = "📑";
+                if (file.endsWith(".csv")) icon = "🗂️";
+                if (file.endsWith(".txt")) icon = "📄";
+
+                fileDiv.innerText = `${icon} ${file}`;
+
+                fileDiv.addEventListener("click", () => {
+                    window.open(
+                        `http://127.0.0.1:8000/reports/${folder}/${file}`,
+                        "_blank"
+                    );
+                });
+
+                folderDiv.appendChild(fileDiv);
+            });
+
+            historyDiv.appendChild(folderDiv);
+        });
+
+    } catch (error) {
+        historyDiv.innerHTML =
+            "<p class='no-history'>Error loading history</p>";
+        console.error(error);
     }
 }
 
-// ---------------------------
-// LOAD SPECIFIC REPORT
-// ---------------------------
-const modal = document.getElementById("reportModal");
-const modalContent = document.getElementById("modalReportContent");
-const modalTitle = document.getElementById("modalTitle");
-const closeModalBtn = document.getElementById("closeModal");
-const downloadBtn = document.getElementById("downloadBtn");
 
-let currentReportFile = "";
-
-// Open report in popup
-async function loadReport(filename) {
-    try {
-        
-        const res = await fetch("http://127.0.0.1:8000/reports/" + filename);
-        const text = await res.text();
-
-        modalTitle.innerText = filename;
-        modalContent.innerText = text;
-        currentReportFile = filename;
-
-        modal.style.display = "flex";
-
-    } catch {
-        alert("Unable to load report");
-    }
-}
-
-// Close modal
-closeModalBtn.onclick = () => {
-    modal.style.display = "none";
-};
-
-// Close when clicking outside
-window.onclick = (e) => {
-    if (e.target === modal) {
-        modal.style.display = "none";
-    }
-};
-
-// Download button
-downloadBtn.onclick = () => {
-    window.open("http://127.0.0.1:8000/reports/" + currentReportFile, "_blank");
-};
-
-// ---------------------------
+// ==========================================
 // INITIAL LOAD
-// ---------------------------
+// ==========================================
 loadHistory();
