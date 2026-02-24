@@ -85,10 +85,7 @@ function startTimer() {
     timerInterval = setInterval(() => {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         resultBox.innerHTML = `
-            Processing... ⏳ 
-            <span style="color:#94a3b8; font-size:14px;">
-                ${elapsed}s
-            </span>
+            Processing... ⏳  ${elapsed}s
         `;
     }, 100);
 }

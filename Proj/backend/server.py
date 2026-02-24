@@ -57,14 +57,10 @@ app.mount("/reports", StaticFiles(directory=REPORT_DIR), name="reports")
 
 
 
-def generate_pdf_report(video_name, csv_path, output_pdf_path):
+def generate_pdf_report(video_name, csv_path, output_pdf_path, results):
 
-    # CREATE FOLDER IF NOT EXISTS
     output_dir = os.path.dirname(output_pdf_path)
     os.makedirs(output_dir, exist_ok=True)
-    print("DEBUG: Entered generate_pdf_report")
-    print("DEBUG: CSV Path ->", csv_path)
-    print("DEBUG: PDF Path ->", output_pdf_path)
 
     doc = SimpleDocTemplate(output_pdf_path, pagesize=A4)
     elements = []
@@ -73,11 +69,52 @@ def generate_pdf_report(video_name, csv_path, output_pdf_path):
     title_style = styles["Heading1"]
     normal_style = styles["Normal"]
 
-    # Title
+    # -----------------------------
+    # TITLE
+    # -----------------------------
     elements.append(Paragraph("Deepfake Detection Report", title_style))
     elements.append(Spacer(1, 0.3 * inch))
 
-    elements.append(Paragraph(f"Video Name: {video_name}", normal_style))
+    elements.append(Paragraph(f"<b>Video Name:</b> {video_name}", normal_style))
+    elements.append(Spacer(1, 0.2 * inch))
+
+   # -----------------------------
+    # SUMMARY SECTION
+    # -----------------------------
+    elements.append(Paragraph("<b>===== Analysis Summary =====</b>", styles["Heading2"]))
+    elements.append(Spacer(1, 0.2 * inch))
+
+    video_path = results.get("video")
+    model_path = results.get("model")
+    audio_score = results.get("audio_fake_p")
+    lip_sync_score = results.get("lip_sync_fake_p")
+    video_art_score = results.get("video_artifact_fake_p")
+    final_fake = results.get("final_fake_p")
+    authenticity = results.get("authenticity")
+    verdict = results.get("verdict")
+    num_frames = results.get("num_suspicious_frames")
+  #  print("DEBUG: Results in PDF Generation ->", results)
+    summary_text = f"""
+    <b>Video Path:</b> {video_path}<br/>
+    <b>Model Used:</b> {model_path}<br/><br/>
+
+    <b>Audio Fake Probability:</b> {audio_score:.4f}<br/>
+    <b>Lip Sync Manipulation Probability:</b> {lip_sync_score:.4f}<br/>
+    <b>Video Artifact (MMNet) Probability:</b> {video_art_score:.4f}<br/><br/>
+
+    <b>Final Fake Probability:</b> {final_fake:.4f}<br/>
+    <b>Authenticity Score:</b> {authenticity:.4f}<br/>
+    <b>Total Suspicious Frames:</b> {num_frames}<br/><br/>
+
+    <b>Final Verdict:</b> {verdict}
+    """
+
+    elements.append(Paragraph(summary_text, normal_style))
+    elements.append(Spacer(1, 0.4 * inch))
+    # -----------------------------
+    # FRAME LEVEL ANALYSIS
+    # -----------------------------
+    elements.append(Paragraph("<b>===== Frame-Level Detection =====</b>", styles["Heading2"]))
     elements.append(Spacer(1, 0.2 * inch))
 
     fake_count = 0
@@ -87,21 +124,18 @@ def generate_pdf_report(video_name, csv_path, output_pdf_path):
     else:
         with open(csv_path, newline='', encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
-
             rows = list(reader)
             fake_count = len(rows)
 
-            elements.append(Paragraph(f"Total Fake Frames Detected: {fake_count}", normal_style))
+            elements.append(Paragraph(f"<b>Total Suspicious Frames:</b> {fake_count}", normal_style))
             elements.append(Spacer(1, 0.3 * inch))
 
             for row in rows:
-
                 frame_no = row["frame"]
                 time_sec = row["time_sec"]
                 score = row["score"]
                 image_path = os.path.normpath(row["image_path"])
 
-                # Frame Info
                 frame_info = f"""
                 <b>Frame:</b> {frame_no}<br/>
                 <b>Timestamp:</b> {time_sec} sec<br/>
@@ -111,18 +145,17 @@ def generate_pdf_report(video_name, csv_path, output_pdf_path):
                 elements.append(Paragraph(frame_info, normal_style))
                 elements.append(Spacer(1, 0.2 * inch))
 
-                # Add Image if exists
                 if os.path.exists(image_path):
-                    img = Image(image_path, width=4 * inch, height=3 * inch)
+                    img = Image(image_path, width=1 * inch, height=0.75 * inch)
                     elements.append(img)
-                    elements.append(Spacer(1, 0.4 * inch))
+                    elements.append(Spacer(1, 0.2 * inch))
                 else:
                     elements.append(Paragraph("Image not found.", normal_style))
                     elements.append(Spacer(1, 0.3 * inch))
 
-    print("DEBUG: Building PDF...")
     doc.build(elements)
-    print("DEBUG: PDF Built Successfully")
+
+    
 # -----------------------------
 # Root
 # -----------------------------
@@ -161,7 +194,7 @@ async def analyze(video: UploadFile = File(...)):
         f.write(terminal_output)
 
     # CSV report
-    csv_filename = f"{base_name}_{timestamp}_deepfake_report.csv"
+    csv_filename = f"{base_name}_deepfake_report.csv"
     csv_path = os.path.join(video_report_folder, csv_filename)
     results['csv_path'] = csv_path
     if 'frame_level_points' in results:
@@ -179,9 +212,10 @@ async def analyze(video: UploadFile = File(...)):
     )
 
     generate_pdf_report(
-        video_name=base_name,
-        csv_path=csv_path,
-        output_pdf_path=pdf_path
+    video_name=base_name,
+    csv_path=csv_path,
+    output_pdf_path=pdf_path,
+    results=results
     )
 
     return {

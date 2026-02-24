@@ -526,7 +526,18 @@ def run_pipeline(video_path, model_path, out_audio="extracted_audio.wav", device
     print(f"FINAL fake p : {final_fake_score:.4f}  (1 = very likely fake)")
     print(f"Authenticity : {authenticity:.4f}  (1 = likely real)")
 
-    verdict = "FAKE" if final_fake_score >= 0.5 else "REAL/likely"
+    num_frames = len(frame_points)
+
+    if final_fake_score >= 0.75:
+        verdict = "HIGHLY LIKELY FAKE"
+    elif final_fake_score >= 0.50:
+        verdict = "LIKELY FAKE"
+    elif final_fake_score >= 0.30:
+        verdict = "SUSPICIOUS - POSSIBLE MANIPULATION"
+    elif final_fake_score < 0.30 and num_frames > 5:
+        verdict = "LOW OVERALL SCORE, BUT MULTIPLE SUSPICIOUS FRAMES DETECTED"
+    else:
+        verdict = "LIKELY REAL"
     print(f"VERDICT      : {verdict}")
 
     # -------- Frame-level explainable output --------
@@ -597,7 +608,8 @@ def run_pipeline(video_path, model_path, out_audio="extracted_audio.wav", device
     "authenticity": authenticity,
     "verdict": verdict,
     "frame_level_points": frame_points,   # 👈 EXPLAINABLE OUTPUT
-    "num_suspicious_frames": len(frame_points)
+    "num_suspicious_frames": len(frame_points),
+    
 }
 
 
