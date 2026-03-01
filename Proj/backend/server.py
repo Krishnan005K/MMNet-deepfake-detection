@@ -8,7 +8,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from fpdf import FPDF
 import os
+import librosa
 import csv
+import moviepy.editor as mp_editor
+import numpy as np
+import cv2
+import mediapipe as mp
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib import colors
@@ -20,7 +25,8 @@ from reportlab.pdfbase import pdfmetrics
 from deepfake_full_pipeline import detect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-
+from reportlab.platypus import Table, TableStyle
+from reportlab.lib import colors
 app = FastAPI()
 
 # -----------------------------
@@ -51,13 +57,106 @@ os.makedirs(REPORT_DIR, exist_ok=True)
 app.mount("/frames", StaticFiles(directory=FRAME_DIR), name="frames")
 app.mount("/reports", StaticFiles(directory=REPORT_DIR), name="reports")
 
+
+# ---------------------------------------
+# 1️⃣ Extract Audio
+# ---------------------------------------
+def extract_audio(video_path, output_audio_path):
+    clip = mp_editor.VideoFileClip(video_path)
+    clip.audio.write_audiofile(output_audio_path, codec="pcm_s16le")
+    return output_audio_path
+
+
+# ---------------------------------------
+# 2️⃣ MFCC Heatmap
+# ---------------------------------------
+def generate_mfcc_heatmap(audio_path, output_dir):
+    y, sr = librosa.load(audio_path, sr=None)
+
+    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=20)
+
+    heatmap_path = os.path.join(output_dir, "mfcc_heatmap.png")
+
+    plt.figure(figsize=(10, 4))
+    librosa.display.specshow(mfccs, x_axis="time", sr=sr)
+    plt.colorbar()
+    plt.title("MFCC Heatmap")
+    plt.tight_layout()
+    plt.savefig(heatmap_path)
+    plt.close()
+
+    return heatmap_path
+
+
+# ---------------------------------------
+# 3️⃣ LipSync + Audio Energy Graph
+# ---------------------------------------
+def generate_lipsync_graph(video_path, audio_path, output_dir):
+
+    # --- Audio Energy ---
+    y, sr = librosa.load(audio_path)
+    frame_hop = int(sr / 30)
+    energy = librosa.feature.rms(y=y, hop_length=frame_hop)[0]
+    energy = (energy - np.min(energy)) / (np.max(energy) - np.min(energy) + 1e-8)
+
+    # --- Lip Distance ---
+    mp_face_mesh = mp.solutions.face_mesh
+    cap = cv2.VideoCapture(video_path)
+    lip_distances = []
+
+    with mp_face_mesh.FaceMesh(static_image_mode=False) as face_mesh:
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = face_mesh.process(rgb)
+
+            if results.multi_face_landmarks:
+                lm = results.multi_face_landmarks[0]
+                h, w, _ = frame.shape
+                upper = lm.landmark[13]
+                lower = lm.landmark[14]
+
+                dist = np.linalg.norm(
+                    np.array([upper.x * w, upper.y * h]) -
+                    np.array([lower.x * w, lower.y * h])
+                )
+                lip_distances.append(dist)
+            else:
+                lip_distances.append(0)
+
+    cap.release()
+
+    lip_distances = np.array(lip_distances)
+    lip_distances = (lip_distances - np.min(lip_distances)) / \
+                    (np.max(lip_distances) - np.min(lip_distances) + 1e-8)
+
+    min_len = min(len(lip_distances), len(energy))
+    lip_distances = lip_distances[:min_len]
+    energy = energy[:min_len]
+
+    graph_path = os.path.join(output_dir, "lipsync_energy_graph.png")
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(lip_distances, label="Lip Distance")
+    plt.plot(energy, label="Audio Energy")
+    plt.legend()
+    plt.title("Audio vs Lip Movement Comparison")
+    plt.tight_layout()
+    plt.savefig(graph_path)
+    plt.close()
+
+    return graph_path
+
 # -----------------------------
 # Utility: PDF generation
 # -----------------------------
 
 
 
-def generate_pdf_report(video_name, csv_path, output_pdf_path, results):
+def generate_pdf_report(video_name, csv_path, output_pdf_path, results, heatmap_path,lipsync_graph_path):
 
     output_dir = os.path.dirname(output_pdf_path)
     os.makedirs(output_dir, exist_ok=True)
@@ -111,47 +210,76 @@ def generate_pdf_report(video_name, csv_path, output_pdf_path, results):
 
     elements.append(Paragraph(summary_text, normal_style))
     elements.append(Spacer(1, 0.4 * inch))
-    # -----------------------------
-    # FRAME LEVEL ANALYSIS
-    # -----------------------------
+     # ADD MFCC GRAPH
+    elements.append(Paragraph("MFCC Heatmap Analysis", styles["Heading2"]))
+    elements.append(Spacer(1, 0.2 * inch))
+    elements.append(Image(heatmap_path, width=5 * inch, height=3 * inch))
+    elements.append(Spacer(1, 0.4 * inch))
+
+    # ADD LIP SYNC GRAPH
+    elements.append(Paragraph("Lip Sync vs Audio Energy", styles["Heading2"]))
+    elements.append(Spacer(1, 0.2 * inch))
+    elements.append(Image(lipsync_graph_path, width=5 * inch, height=3 * inch))
+    elements.append(Spacer(1, 0.4 * inch))
+
+
+    # ---------------------------------------------
+    # FRAME LEVEL SECTION (2 IMAGES PER ROW)
+    # ---------------------------------------------
     elements.append(Paragraph("<b>===== Frame-Level Detection =====</b>", styles["Heading2"]))
     elements.append(Spacer(1, 0.2 * inch))
 
-    fake_count = 0
+    image_row = []
+    table_data = []
 
-    if not os.path.exists(csv_path):
-        elements.append(Paragraph("No fake frames detected.", normal_style))
-    else:
+    if os.path.exists(csv_path):
         with open(csv_path, newline='', encoding="utf-8") as csvfile:
-            reader = csv.DictReader(csvfile)
-            rows = list(reader)
-            fake_count = len(rows)
+            reader = list(csv.DictReader(csvfile))
 
-            elements.append(Paragraph(f"<b>Total Suspicious Frames:</b> {fake_count}", normal_style))
-            elements.append(Spacer(1, 0.3 * inch))
-
-            for row in rows:
-                frame_no = row["frame"]
-                time_sec = row["time_sec"]
-                score = row["score"]
-                image_path = os.path.normpath(row["image_path"])
+            for idx, row in enumerate(reader):
 
                 frame_info = f"""
-                <b>Frame:</b> {frame_no}<br/>
-                <b>Timestamp:</b> {time_sec} sec<br/>
-                <b>Fake Score:</b> {score}
+                <b>Frame:</b> {row['frame']}<br/>
+                <b>Timestamp:</b> {row['time_sec']} sec<br/>
+                <b>Fake Score:</b> {row['score']}
                 """
 
-                elements.append(Paragraph(frame_info, normal_style))
-                elements.append(Spacer(1, 0.2 * inch))
+                if os.path.exists(row["image_path"]):
 
-                if os.path.exists(image_path):
-                    img = Image(image_path, width=1 * inch, height=0.75 * inch)
-                    elements.append(img)
-                    elements.append(Spacer(1, 0.2 * inch))
-                else:
-                    elements.append(Paragraph("Image not found.", normal_style))
-                    elements.append(Spacer(1, 0.3 * inch))
+                    img = Image(row["image_path"], width=2.5*inch, height=1.8*inch)
+
+                    # Combine text + image vertically
+                    cell = [
+                        Paragraph(frame_info, styles["Normal"]),
+                        Spacer(1, 0.1 * inch),
+                        img
+                    ]
+
+                    image_row.append(cell)
+
+                    # When 2 images collected → make one row
+                    if len(image_row) == 2:
+                        table_data.append(image_row)
+                        image_row = []
+
+            # If odd number → last single image row
+            if len(image_row) == 1:
+                table_data.append(image_row)
+
+        if table_data:
+            table = Table(table_data, colWidths=[3*inch, 3*inch])
+            table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('BOX', (0,0), (-1,-1), 0.5, colors.grey),
+                ('INNERGRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ]))
+
+            elements.append(table)
+        # Set metadata
+    doc.title = f"Deepfake Report - {video_name}"
+    doc.author = "Deepfake Detection System"
+    doc.subject = "AI Deepfake Analysis Report"
+    doc.creator = "Deepfake Backend Service"
 
     doc.build(elements)
 
@@ -203,17 +331,24 @@ async def analyze(video: UploadFile = File(...)):
 
     # PDF report
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
+    report_folder = os.path.join(REPORT_DIR, base_name)
+    os.makedirs(report_folder, exist_ok=True)
     pdf_path = os.path.join(
         BASE_DIR,
         "reports",
         base_name,
         f"{base_name}_report.pdf"
     )
+    audio_path = os.path.join(UPLOAD_DIR, f"{base_name}.wav")
+    heatmap_path = generate_mfcc_heatmap(audio_path, report_folder)
+    lipsync_graph_path = generate_lipsync_graph(video_path, audio_path, report_folder)
 
+    
     generate_pdf_report(
     video_name=base_name,
     csv_path=csv_path,
+    heatmap_path=heatmap_path,
+    lipsync_graph_path=lipsync_graph_path,
     output_pdf_path=pdf_path,
     results=results
     )
@@ -238,7 +373,7 @@ def get_reports():
         folder_path = os.path.join(REPORT_DIR, folder)
         if os.path.isdir(folder_path):
             for file in os.listdir(folder_path):
-                if file.endswith((".txt", ".csv", ".pdf")):
+                if file.endswith((".pdf")):
                     all_reports.append({
                         "filename": file,
                         "folder": folder

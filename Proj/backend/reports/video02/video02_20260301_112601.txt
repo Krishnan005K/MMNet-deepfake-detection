@@ -1,0 +1,42 @@
+MoviePy - Writing audio in D:\Projects\Final Yr Proj\phase 1 project\MMNet-deepfake-detection\Proj\backend\uploads\video02.wav
+MoviePy - Done.
+[+] Device: cpu
+[+] Loading audio model...
+[+] Predicting audio deepfake probability...
+[+] Calculating lip-sync score (may take time)...
+[+] Computing video artifact heuristic...
+[+] Running frame-level explainable analysis...
+
+===== Deepfake Report =====
+Video        : D:\Projects\Final Yr Proj\phase 1 project\MMNet-deepfake-detection\Proj\backend\uploads\video02.mp4
+Model        : ../fake_audio_detector.pth
+Audio Fake Model : 0.0000   (audio model)
+Video Fake Model : MMNET model  (video model)
+Lip-sync p   : 0.5437 (1 - sync_score; 0=good sync)
+Video art p  : 0.9715 (MMNET)
+FINAL fake p : 0.2603  (1 = very likely fake)
+Authenticity : 0.7397  (1 = likely real)
+VERDICT      : LOW OVERALL SCORE, BUT MULTIPLE SUSPICIOUS FRAMES DETECTED
+
+--- Frame-Level Analysis ---
+Suspicious Frames Count : 215
+Suspicious Frames : 215
+ • Time 0.17s | Frame 5 | Score 0.98
+ • Time 2.33s | Frame 70 | Score 0.982
+ • Time 2.5s | Frame 75 | Score 0.974
+ • Time 2.67s | Frame 80 | Score 0.974
+ • Time 2.83s | Frame 85 | Score 0.975
+Potential deepfake detected at:
+  • Time 0.17s | Frame 5 | Score 0.98
+  • Time 2.33s | Frame 70 | Score 0.982
+  • Time 2.5s | Frame 75 | Score 0.974
+  • Time 2.67s | Frame 80 | Score 0.974
+  • Time 2.83s | Frame 85 | Score 0.975
+  • Time 3.17s | Frame 95 | Score 0.996
+  • Time 4.17s | Frame 125 | Score 0.992
+  • Time 4.33s | Frame 130 | Score 0.986
+  • Time 4.5s | Frame 135 | Score 0.985
+  • Time 4.67s | Frame 140 | Score 0.983
+  ...and 205 more suspicious frames
+--------------------------------------
+[+] CSV saved: video02_deepfake_report.csv
